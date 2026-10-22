@@ -60,3 +60,7 @@ A cell is 2×4 dots, so a 120×40 terminal is really 240×160 pixels. That's eno
 ## license
 
 MIT.
+
+## Social
+
+[![Discord](https://img.shields.io/badge/Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.com/users/1515183303995560096)
