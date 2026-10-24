@@ -9,11 +9,24 @@ vizr
 
 ![bars mode](docs/bars.png)
 
+## what's new in 5.1.0
+
+- **24 modes, up from 12.** New ones: tunnel, spiral, scope, warp, mandala, spectrogram, torus, rain, bloom, vortex, ribbons, comets.
+- **Mode morphing.** Switching modes glides the cloud from the old shape to the new one instead of snapping. `morph` in settings controls the glide time, `0` = instant.
+- **Sparkle.** Fast-moving particles randomly twinkle. On by default at `0.15`.
+- **Credits tab.** Press `9` in the settings panel, or run `vizr --credits` from the shell.
+- **Four new presets.** Hyperspace, Zen, Bloom, Turbine.
+
 ## what it does
 
 Captures your audio, turns the spectrum into a few thousand particles, and draws them as braille dots — so you get 2×4 sub-pixel resolution per cell instead of the usual one-block-per-character.
 
-Twelve modes, all of them audio-reactive: `bars`, `mirror`, `radial`, `wave`, `galaxy`, `helix`, `sphere`, `flow`, `aurora`, `terrain`, `lissajous`, `ripple`.
+Twenty-four modes, all audio-reactive:
+
+- **spectrum**: `bars`, `mirror`, `radial`, `wave`, `scope`, `spectrogram`
+- **organic**: `galaxy`, `helix`, `sphere`, `flow`, `aurora`, `terrain`, `lissajous`, `ripple`
+- **geometric**: `mandala`, `torus`, `rain`, `bloom`, `ribbons`
+- **motion**: `tunnel`, `spiral`, `warp`, `vortex`, `comets`
 
 ![galaxy mode](docs/galaxy.png)
 
@@ -35,8 +48,8 @@ Press `?` in the app for the full list. The ones you'll actually use:
 
 | | |
 |---|---|
-| `1`–`9`, `0` | switch mode |
-| `m` / `M` | next / previous mode |
+| `1`–`9`, `0` | first ten modes |
+| `m` / `M` | cycle through all 24 |
 | `space` | play / pause |
 | `,` `.` | previous / next track |
 | `s` | settings panel |
@@ -49,6 +62,7 @@ Settings persist to `~/.config/vizr/config.json`. Everything in the settings pan
 
 - Python 3.8+
 - `numpy`, `pillow`, `sounddevice` (installed automatically)
+- Linux or macOS (Windows support is planned for 5.2.x)
 - A terminal with truecolor and a font that has braille (most do)
 - PortAudio on the system: `sudo pacman -S portaudio` on Arch, `sudo apt install libportaudio2` on Debian/Ubuntu, `brew install portaudio` on macOS
 - Optional: `playerctl` for the now-playing HUD
@@ -56,6 +70,16 @@ Settings persist to `~/.config/vizr/config.json`. Everything in the settings pan
 ## why braille
 
 A cell is 2×4 dots, so a 120×40 terminal is really 240×160 pixels. That's enough to draw particles with trails without them looking like scattered blobs. The dots are also anti-aliased by the font itself, so motion looks smoother than it has any right to at this resolution.
+
+## credits
+
+Everything lives under `vizr --credits`, or the **Credits** tab in settings (key `9`). Short version:
+
+- [Source](https://github.com/exotic-erox/vizr)
+- [PyPI](https://pypi.org/project/vizr/)
+- [Discord](https://discord.com/users/1515183303995560096)
+
+Made by [Erox](https://github.com/exotic-erox). One file, 24 modes, numpy and nothing else.
 
 ## license
 
