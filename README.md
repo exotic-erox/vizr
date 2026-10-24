@@ -71,20 +71,12 @@ Settings persist to `~/.config/vizr/config.json`. Everything in the settings pan
 
 A cell is 2×4 dots, so a 120×40 terminal is really 240×160 pixels. That's enough to draw particles with trails without them looking like scattered blobs. The dots are also anti-aliased by the font itself, so motion looks smoother than it has any right to at this resolution.
 
-## credits
-
-Everything lives under `vizr --credits`, or the **Credits** tab in settings (key `9`). Short version:
-
-- [Source](https://github.com/exotic-erox/vizr)
-- [PyPI](https://pypi.org/project/vizr/)
-- [Discord](https://discord.com/users/1515183303995560096)
-
-Made by [Erox](https://github.com/exotic-erox). One file, 24 modes, numpy and nothing else.
-
 ## license
 
 MIT.
 
 ## Social
 
+[![PyPI](https://img.shields.io/badge/PyPI-vizr-3775A9?style=for-the-badge&logo=pypi&logoColor=white)](https://pypi.org/project/vizr/)
+[![GitHub](https://img.shields.io/badge/GitHub-vizr-181717?style=for-the-badge&logo=github&logoColor=white)](https://github.com/exotic-erox/vizr)
 [![Discord](https://img.shields.io/badge/Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.com/users/1515183303995560096)
