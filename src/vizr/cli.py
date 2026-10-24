@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
-"""Terminal music visualizer built around audio-reactive braille particles.
+"""vizr - a terminal music visualizer.
 
-The visualizer has several display modes, an optional MPRIS now-playing
-panel, and a sidebar for album art. Audio is captured through parec or
-sounddevice; the demo signal is used when capture is unavailable.
+Particles on a braille grid, twenty-four ways of arranging them, and a
+now-playing bar if playerctl is around. Audio comes from parec, or
+sounddevice, or a fake signal when neither works.
 
-Requires Python 3.8+, NumPy, and a true-colour terminal with a braille font.
-Optional tools: playerctl, parec or sounddevice, and Pillow for album art.
+Needs Python 3.8+, numpy, and a terminal that does true colour. Optional:
+playerctl for the HUD, Pillow for album art.
 
-Press ? while running to see the controls. Settings are stored under
-~/.config/vizr/config.json by default.
+? shows the keys, s opens settings. Config lives in ~/.config/vizr.
 """
 from __future__ import annotations
 
@@ -34,11 +33,18 @@ import unicodedata
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Tuple
 
 import numpy as np
 
-VERSION = '4.0.0'
+VERSION = '5.1.0'
+
+# where to find the project and the person behind it
+REPO = 'https://github.com/exotic-erox/vizr'
+PYPI = 'https://pypi.org/project/vizr/'
+GITHUB = 'https://github.com/exotic-erox'
+DISCORD = 'https://discord.com/users/1515183303995560096'
+AUTHOR = 'Erox'
 
 
 # Constants
@@ -51,8 +57,12 @@ HANN = np.hanning(NF).astype(np.float32)
 BW = np.array([[1, 8], [2, 16], [4, 32], [64, 128]], dtype=np.int32)
 BRAILLE = [chr(0x2800 + k) for k in range(256)]
 
+# index is the mode id, so keep the order: the first ten are on the number
+# row, presets point at names, and people memorise positions.
 MODES = ['bars', 'mirror', 'radial', 'wave', 'galaxy', 'helix', 'sphere', 'flow',
-         'aurora', 'terrain', 'lissajous', 'ripple']
+         'aurora', 'terrain', 'lissajous', 'ripple', 'tunnel', 'spiral', 'scope',
+         'warp', 'mandala', 'spectrogram', 'torus', 'rain', 'bloom', 'vortex',
+         'ribbons', 'comets']
 HUE_STEPS = 16                        # colour columns in the LUT
 LEVELS = 16                           # brightness rows in the LUT
 
@@ -80,13 +90,26 @@ C_DIM = fg(132, 146, 166)             # >= 6:1 on the panel background
 C_TXT = fg(208, 216, 226)
 C_WHITE = '\x1b[1;38;2;240;244;247m'
 C_OK = fg(120, 220, 140)
-C_WARN = fg(255, 190, 80)
 PANEL_BG = bgc(11, 13, 24)
 SEL_BG = bgc(27, 31, 56)
 
 
 def clamp(v, lo, hi):
     return lo if v < lo else hi if v > hi else v
+
+
+def open_url(url):
+    """xdg-open if it's there, webbrowser if not."""
+    opener = shutil.which('xdg-open') or shutil.which('open')
+    try:
+        if opener:
+            subprocess.Popen([opener, url], stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
+            return True
+        import webbrowser
+        return webbrowser.open(url)
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 
 def fmt_time(x):
@@ -239,6 +262,7 @@ class Setting:
     desc: str = ''
     zero: str = ''
     log: bool = False
+    url: str = ''
 
 
 def slider(key, label, tab, default, lo, hi, step, fmt='{:.2f}', desc='', zero=''):
@@ -261,13 +285,20 @@ def action(key, label, tab, desc=''):
     return Setting(key, label, tab, 'action', None, desc=desc)
 
 
-TABS = ('Display', 'Particles', 'Physics', 'Audio', 'HUD', 'Player', 'System', 'Presets')
-TABS_SHORT = ('Disp', 'Part', 'Phys', 'Aud', 'HUD', 'Play', 'Sys', 'Pre')
+def link(key, label, tab, url, desc=''):
+    """A settings row that's a URL, not a value."""
+    return Setting(key, label, tab, 'link', None, desc=desc, url=url)
+
+
+TABS = ('Display', 'Particles', 'Physics', 'Audio', 'HUD', 'Player', 'System',
+        'Presets', 'Credits')
+TABS_SHORT = ('Disp', 'Part', 'Phys', 'Aud', 'HUD', 'Play', 'Sys', 'Pre', 'Cred')
 
 SETTINGS: List[Setting] = [
     # display
     choice('mode', 'Visual mode', 'Display', 'bars', MODES,
-           'Visualization to draw. Keys 1-9 and 0, m/M or left/right to cycle.'),
+           'Visualization to draw. Keys 1-9 and 0 reach the first ten, '
+           'm/M or left/right cycles all twenty.'),
     choice('theme', 'Theme', 'Display', 'Classic', tuple(THEMES),
            'Sets accent, second accent, colour mode and background together.'),
     choice('accent', 'Accent colour', 'Display', 'cyan', ACCENT_NAMES,
@@ -290,6 +321,10 @@ SETTINGS: List[Setting] = [
            desc='Persistence of lit dots. Higher = longer tails (costs a bit of CPU).'),
     slider('flash', 'Beat flash', 'Display', .35, 0, 1, .05, zero='off',
            desc='Background pulses with the accent colour on every beat.'),
+    slider('sparkle', 'Sparkle', 'Display', .15, 0, 1, .05, zero='off',
+           desc='Random bright twinkles on fast-moving particles.'),
+    slider('morph', 'Mode morph time', 'Display', .45, 0, 1.2, .05, fmt='{:.2f}s', zero='instant',
+           desc='How long the cloud takes to glide into a new mode.'),
     choice('symmetry', 'Symmetry', 'Display', 'off', ('off', 'mirror-h', 'mirror-v', 'quad'),
            'Kaleidoscope mirroring. Key: Y.'),
     choice('background', 'Background', 'Display', 'dark', tuple(BACKGROUNDS),
@@ -433,12 +468,26 @@ SETTINGS: List[Setting] = [
     action('preset_Kaleido', 'Preset: Kaleidoscope', 'Presets', 'Rainbow flow field mirrored four ways, long trails.'),
     action('preset_Synthwave', 'Preset: Synthwave', 'Presets', 'Sunset terrain ridgelines with pulsing background.'),
     action('preset_Cosmos', 'Preset: Cosmos', 'Presets', 'Dense 3D sphere with art colours and soft trails.'),
+    action('preset_Hyperspace', 'Preset: Hyperspace', 'Presets', 'Tunnel and warp streaks with heavy bass kick.'),
+    action('preset_Zen', 'Preset: Zen', 'Presets', 'Slow mandala petals, muted colour, no flashing.'),
+    action('preset_Bloom', 'Preset: Bloom', 'Presets', 'Flower per band, soft gradient, slow morph.'),
+    action('preset_Turbine', 'Preset: Turbine', 'Presets', 'Vortex shear with sparkle and hard kicks.'),
     action('save_1', 'Save to user slot 1', 'Presets', 'Store visual/physics/audio settings in slot 1.'),
     action('save_2', 'Save to user slot 2', 'Presets', 'Store visual/physics/audio settings in slot 2.'),
     action('save_3', 'Save to user slot 3', 'Presets', 'Store visual/physics/audio settings in slot 3.'),
     action('load_1', 'Load user slot 1', 'Presets', 'Recall slot 1.'),
     action('load_2', 'Load user slot 2', 'Presets', 'Recall slot 2.'),
     action('load_3', 'Load user slot 3', 'Presets', 'Recall slot 3.'),
+
+    # not settings, but the panel is a good place for them
+    link('cr_repo', 'Source code', 'Credits', REPO,
+         'The repository - issues, releases and the full history.'),
+    link('cr_pypi', 'PyPI package', 'Credits', PYPI,
+         'Install or upgrade with:  pip install -U vizr'),
+    link('cr_github', 'GitHub profile', 'Credits', GITHUB,
+         'Everything else %s has built.' % AUTHOR),
+    link('cr_discord', 'Discord', 'Credits', DISCORD,
+         'Bug reports, feature ideas, or just say hi.'),
 ]
 
 # tabs a preset is allowed to touch (system/fps/mouse etc left alone)
@@ -462,6 +511,14 @@ PRESETS: Dict[str, Dict[str, Any]] = {
                       brightness=1.15, damping=.84),
     'Cosmos': dict(theme='Aurora', mode='sphere', density=2.2, trail=.5, glow=.85,
                    art_colors=True, flash=.25),
+    'Hyperspace': dict(theme='Prism', mode='tunnel', trail=.62, glow=1.0, flash=.4,
+                       beat_force=1.8, flow=1.4, hue_speed=.5, density=1.6),
+    'Zen': dict(theme='Mono', mode='mandala', trail=.35, glow=.5, flash=0.0,
+                beat_force=.3, jitter=.3, damping=.88, flow=.4, brightness=.95),
+    'Bloom': dict(theme='Borealis', mode='bloom', trail=.30, glow=.75, morph=.8,
+                  spring=.07, damping=.86, density=1.4, sparkle=.2),
+    'Turbine': dict(theme='Toxic', mode='vortex', trail=.55, glow=.9, sparkle=.45,
+                    beat_force=2.0, flow=1.6, spring=.14, damping=.78, density=1.8),
 }
 
 
@@ -477,10 +534,14 @@ def default_config_path():
 
 
 class Config:
+    """Values plus the bookkeeping: coercion, a dirty set so App knows what
+    changed, and an atomic save. Nothing in here knows what a setting means -
+    that all lives in the SETTINGS table."""
+
     def __init__(self, path):
         self.path = path
         self.defs = {s.key: s for s in SETTINGS}
-        self.v = {s.key: s.default for s in SETTINGS if s.kind != 'action'}
+        self.v = {s.key: s.default for s in SETTINGS if s.kind not in ('action', 'link')}
         self.dirty = set()
         self.slots = {}
         self.meta = {'seen_help': False, 'prefer': [], 'version': ''}
@@ -489,6 +550,7 @@ class Config:
         return self.v[key]
 
     def coerce(self, key, val):
+        """Clamp it, or give up and use the default. Never raises."""
         s = self.defs[key]
         try:
             if s.kind == 'toggle':
@@ -502,6 +564,7 @@ class Config:
             return s.default
 
     def set(self, key, val):
+        """True if it actually changed, so callers can skip the work."""
         val = self.coerce(key, val)
         if self.v.get(key) == val:
             return False
@@ -519,7 +582,7 @@ class Config:
 
     def reset_tabs(self, tabs):
         for s in SETTINGS:
-            if s.tab in tabs and s.kind != 'action':
+            if s.tab in tabs and s.kind not in ('action', 'link'):
                 self.set(s.key, s.default)
 
     def apply(self, values):
@@ -570,6 +633,8 @@ class Config:
     def fmt_value(s, v):
         if s.kind == 'action':
             return 'run'
+        if s.kind == 'link':
+            return 'open'
         if s.kind == 'toggle':
             return 'ON' if v else 'off'
         if s.kind == 'choice':
@@ -582,7 +647,7 @@ class Config:
         return self.fmt_value(self.defs[key], self.v.get(key))
 
     def snapshot(self, tabs=PRESET_TABS):
-        keys = [s.key for s in SETTINGS if s.tab in tabs and s.kind != 'action']
+        keys = [s.key for s in SETTINGS if s.tab in tabs and s.kind not in ('action', 'link')]
         return {k: self.v[k] for k in keys}
 
     def load(self):
@@ -640,6 +705,7 @@ class Audio:
         self.start(source)
 
     def start(self, source):
+        """First backend that works wins: parec, then sounddevice, then demo."""
         self.stop()
         self.requested = source
         self.src, self.label = 'demo', 'demo signal'
@@ -757,6 +823,8 @@ class Spec:
         self.wp = .05
 
     def configure(self, nb, fmin, fmax, tilt):
+        """Rebuild the band edges. Called every frame, so bail early when
+        nothing changed."""
         key = (nb, fmin, fmax, tilt)
         if key == self.key:
             return
@@ -765,6 +833,8 @@ class Spec:
         f = np.fft.rfftfreq(NF, 1 / SR)
         e = np.geomspace(max(fmin, 20), fmax, nb + 1)
         ix = np.searchsorted(f, e).astype(int)
+        # at 20 Hz the low bands land on the same bin; force them strictly
+        # increasing so reduceat() never gets an empty slice
         ix[0] = max(ix[0], 1)
         for i in range(1, nb + 1):
             ix[i] = max(ix[i], ix[i - 1] + 1)
@@ -802,8 +872,9 @@ TAU = 6.283185307179586
 
 
 class Field:
-    """Particle cloud. `step()` sets target positions for the current mode,
-    then particles spring toward them; `render()` rasterizes to braille."""
+    """Particles. step() picks where they should be, render() turns that into
+    braille cells. They talk through self.e - step writes the brightness,
+    render reads it. Saves passing a big tuple around every frame."""
 
     ATTRS = ('x', 'y', 'vx', 'vy', 'pb', 'u', 'rx', 'xi', 'sg', 'slot', 'arm',
              'rn', 'ph', 'e')
@@ -823,6 +894,11 @@ class Field:
         self.ring_c = np.zeros((self.RINGS, 2))
         self.ring_i = 0
         self.last_ring = 0.0
+        self.tun = 0.0                    # tunnel depth offset
+        self.spec = None                  # spectrogram history, lazily sized
+        self.spec_t = 0.0
+        self.rhx = self.rhy = self.rL = None   # raw targets, this frame
+        self.shx = self.shy = self.sL = None   # frozen targets, morph source
         count = max(256, int(count))
         for k, arr in self._make(count, 0).items():
             setattr(self, k, arr)
@@ -867,7 +943,20 @@ class Field:
         self.ring_c[i] = (x, y)
         self.last_ring = t
 
-    def step(self, mode, lv, bass, beat, mp, shocks, dt, t, wv, P):
+    def snap(self):
+        """Remember where everything was, so a mode change can glide instead
+        of snapping. Does nothing on the first frame, or after flow (which
+        has no targets to freeze)."""
+        if self.rhx is None or self.rhy is None or self.rL is None:
+            self.shx = self.shy = self.sL = None
+            return
+        self.shx = np.array(self.rhx, dtype=float, copy=True)
+        self.shy = np.array(self.rhy, dtype=float, copy=True)
+        self.sL = np.array(self.rL, dtype=float, copy=True)
+
+    def step(self, mode, lv, bass, beat, mp, shocks, dt, t, wv, P, morph=1.0):
+        """One tick. The mode branches only set hx/hy/L; the shared tail does
+        the kicks, the pointer and the spring."""
         PW, PH, nb = self.PW, self.PH, self.nb
         a = self.active
         x, y, vx, vy = self.x[:a], self.y[:a], self.vx[:a], self.vy[:a]
@@ -1008,7 +1097,7 @@ class Field:
             hx = cx + X * PW * .30 * amp + (rx - .5) * (1.2 + Lb * 4)
             hy = cy + Y * PH * .36 * amp + (u - .5) * (1.2 + Lb * 4)
             L = np.clip(.3 + Lb * .6 + .2 * np.sin(th * 3 + ta), 0, 1.1)
-        else:                                            # beat ripples
+        elif mode == 11:                                 # beat ripples
             if beat or t - self.last_ring > 1.6:
                 self.spawn_ring(t, bass, cx, cy)
             for sx, sy, _kind in shocks:
@@ -1028,6 +1117,161 @@ class Field:
             fade = np.clip(1 - age / life, 0, 1)
             L = np.where(alive, np.clip(fade * (.5 + rs_ * 1.2) + .15, 0, 1.1),
                          np.clip(.2 + Lc * .6, 0, 1.1))
+        elif mode == 12:                                 # tunnel
+            # depth from xi, so the spring drags the far ones in by itself
+            self.tun = (self.tun + dt * (.35 + bass * 1.4) * flow) % 1.0
+            z = (xi + self.tun) % 1.0                    # 0 far .. 1 near
+            th = rx * TAU + z * 1.6 + t * .1 * flow
+            rad = mn * .04 + z * z * mn * .62
+            wob = 1 + np.sin(pb / nb * TAU * 2 + t * .7) * .06 * bass
+            hx = cx + np.cos(th) * rad * wob
+            hy = cy + np.sin(th) * rad * wob * .72
+            L = np.clip(.12 + (1 - z) * .22 + lv[pb] * .8 * z + z * .25, 0, 1.1)
+        elif mode == 13:                                 # spiral
+            # radius grows exponentially with ph - that's what makes it a
+            # spiral instead of galaxy's scatter
+            self.rot += dt * (.4 + bass * 1.2) * flow
+            a0 = ph * 3.4                                # turns along the arm
+            th = arm * TAU / 3 + a0 + self.rot
+            rad = mn * .05 * np.exp(a0 * .62) + (u - .5) * (2 + lv[pb] * 6)
+            rad = np.minimum(rad, mn * .55) * (1 + .1 * bass)
+            hx = cx + np.cos(th) * rad
+            hy = cy + np.sin(th) * rad * .86
+            L = np.clip(.14 + lv[pb] * .7 + (1 - np.minimum(rad / (mn * .55), 1)) * .4, 0, 1.1)
+        elif mode == 14:                                 # vector scope
+            # two points a third of a buffer apart, plotted against each
+            # other - a real X/Y scope, not a waveform
+            n = len(wv)
+            i0 = np.clip((xi * (n - 1)).astype(int), 0, n - 1)
+            i1 = (i0 + n // 3) % n
+            sx = wv[i0] * .5
+            sy = wv[i1] * .5
+            spin = t * .12 * flow
+            cs, sn = math.cos(spin), math.sin(spin)
+            hx = cx + (sx * cs - sy * sn) * PW * .86 + (u - .5) * 2
+            hy = cy + (sx * sn + sy * cs) * PH * .86 + (rx - .5) * 2
+            L = np.clip(.25 + np.hypot(sx, sy) * .9 + lv[pb] * .3, 0, 1.1)
+        elif mode == 15:                                 # warp
+            self.rot += dt * flow
+            th = rx * TAU
+            z = (xi + t * (.35 + bass * 2.2) * flow * .35) % 1.0
+            rad = z * z * mn * .8
+            hx = cx + np.cos(th + self.rot * .2) * rad
+            hy = cy + np.sin(th + self.rot * .2) * rad * .9
+            hx -= np.cos(th) * z * 6                     # smear the streak inward
+            hy -= np.sin(th) * z * 6
+            L = np.clip(.1 + z * .5 + lv[pb] * .6 * (1 - z) + bass * .2, 0, 1.1)
+        elif mode == 16:                                 # mandala
+            # r(θ) = |cos(kθ)| - the petals come free, and the symmetry is
+            # built in so it doesn't fight the Y key
+            pet = max(3, nb // 3)
+            th = rx * TAU
+            rk = np.abs(np.cos(pet * th / 2))
+            Lb = lv[np.clip((u * nb).astype(int), 0, nb - 1)]
+            rad = mn * (.08 + rk * .40) * (1 + .22 * bass) * (.45 + u * .75) + Lb * mn * .1
+            hx = cx + np.cos(th) * rad
+            hy = cy + np.sin(th) * rad
+            L = np.clip(.18 + Lb * .7 + rk * .35, 0, 1.1)
+        elif mode == 17:                                 # scrolling spectrogram
+            # the grid doesn't move - the history under it scrolls, every
+            # 50 ms
+            cols = max(16, PW // 2)
+            if self.spec is None or self.spec.shape != (cols, nb):
+                self.spec = np.zeros((cols, nb))
+                self.spec_t = 0.0
+            if t - self.spec_t > .05:
+                self.spec[1:] = self.spec[:-1]
+                self.spec[0] = lv
+                self.spec_t = t
+            ci = np.clip((xi * (cols - 1)).astype(int), 0, cols - 1)
+            v = self.spec[cols - 1 - ci, pb]
+            hx = xi * PW + (rx - .5) * PW / cols * .8
+            hy = PH - (pb + .5) / nb * PH + (u - .5) * PH / nb * .8
+            L = np.clip(v * 1.1 + .02, 0, 1.1)
+        elif mode == 18:                                 # torus
+            self.rot += dt * (.3 + bass * 1.0) * flow
+            Rr = mn * .28
+            rr = mn * .10 * (1 + .35 * bass)
+            ph2 = rx * TAU + self.rot
+            th = u * TAU
+            tb = np.clip((u * nb).astype(int), 0, nb - 1)
+            rr2 = rr * (1 + lv[tb] * .8)
+            X = (Rr + rr2 * np.cos(th)) * np.cos(ph2)
+            Z = (Rr + rr2 * np.cos(th)) * np.sin(ph2)
+            Y = rr2 * np.sin(th)
+            if mp[0] > -1e3:
+                tilt = .55 + (mp[1] / PH - .5) * .8
+            else:
+                tilt = .55 + .15 * math.sin(t * .21)
+            ct, st = math.cos(tilt), math.sin(tilt)
+            Y2 = Y * ct - Z * st
+            Z2 = Y * st + Z * ct
+            persp = 3.0 * mn / (3.0 * mn - Z2)
+            hx = cx + X * persp
+            hy = cy + Y2 * persp
+            L = np.clip(.15 + lv[tb] * .65 + (np.cos(th) + 1) * .18 + (Z2 / mn + .5) * .1, 0, 1.1)
+        elif mode == 19:                                 # rain
+            # a band per column, each drop falling at its own band's speed
+            Lb = lv[pb]
+            fall = (ph + t * (.12 + Lb * .8) * flow) % 1.0
+            hx = (pb + .5) / nb * PW + (rx - .5) * PW / nb * .85
+            hy = fall * PH
+            L = np.clip(.06 + Lb * .85 + fall * .12, 0, 1.1)
+        elif mode == 20:                                 # bloom
+            # a flower per band, petals opening with that band's level
+            Lb = lv[pb]
+            open_ = .25 + Lb * 1.15
+            th = rx * TAU
+            petal = np.abs(np.cos((3 + pb % 4) * th / 2)) ** 1.6
+            rad = mn * (.04 + petal * .30 * open_) * (1 + .12 * bass)
+            cxb = (pb + .5) / nb * PW
+            cyb = PH * (.5 + .32 * np.sin(pb * 2.399 + t * .2 * flow))
+            spread = .45 + u * .75
+            hx = cxb + np.cos(th + arm * 2.1) * rad * spread
+            hy = cyb + np.sin(th + arm * 2.1) * rad * spread
+            L = np.clip(.1 + Lb * .85 + petal * .25, 0, 1.1)
+        elif mode == 21:                                 # vortex
+            # fast in the middle, slow at the rim - the shear is the effect
+            rad = mn * (.05 + rn * .5)
+            spin = 2.6 / (rad / mn + .2)
+            th = rx * TAU + t * spin * .3 * flow
+            rad = rad * (1 + .18 * bass + lv[pb] * .25)
+            hx = cx + np.cos(th) * rad
+            hy = cy + np.sin(th) * rad * .92
+            L = np.clip(.1 + lv[pb] * .75 + (1 - rn) * .45, 0, 1.1)
+        elif mode == 22:                                 # ribbons
+            # three sine ribbons, thickness driven by the band underneath
+            seg = arm % 3
+            Lb = lv[np.clip((ph * nb).astype(int), 0, nb - 1)]
+            base = PH * (.28 + .21 * seg)
+            wav = np.sin(ph * TAU * (1.3 + seg * .35) + t * (.55 + seg * .22) * flow)
+            hx = xi * PW
+            hy = base + wav * PH * (.09 + Lb * .22) + (u - .5) * (2 + Lb * 7)
+            L = np.clip(.16 + Lb * .8 + (np.cos(ph * TAU) + 1) * .12, 0, 1.1)
+        else:                                            # comets
+            # u**3 keeps only a few heads lit, like real comet nuclei
+            self.rot += dt * (.18 + bass * .75) * flow
+            th = ph * TAU + self.rot * (.4 + rn * .8)
+            rad = mn * (.1 + rn * .36) * (1 + .25 * bass)
+            hx = cx + np.cos(th) * rad * 1.18
+            hy = cy + np.sin(th) * rad * .78
+            L = np.clip(.06 + lv[pb] * .5 + u ** 3, 0, 1.1)
+
+        # flow has no targets, only velocities - fall back to where we are so
+        # the morph maths and snap() both have something to work with
+        if hx is None or hy is None:
+            hx, hy = x.copy(), y.copy()
+        if L is None:
+            L = self.e[:a]
+
+        # untweened targets, for the next mode change to morph from
+        self.rhx, self.rhy, self.rL = hx, hy, L
+        if (morph < 1 and self.shx is not None and self.shy is not None
+                and self.sL is not None and len(self.shx) == a):
+            m = morph * morph * (3 - 2 * morph)          # smoothstep
+            hx = self.shx + (np.asarray(hx, float) - self.shx) * m
+            hy = self.shy + (np.asarray(hy, float) - self.shy) * m
+            L = self.sL + (np.asarray(L, float) - self.sL) * m
 
         self.e[:a] = L
 
@@ -1087,7 +1331,7 @@ class Field:
             np.clip(x + vx * f, 0, PW - .01, out=x)
             np.clip(y + vy * f, 0, PH - .01, out=y)
 
-    def render(self, lut, bg, color_mode, trail, symmetry='off'):
+    def render(self, lut, bg, color_mode, trail, symmetry='off', sparkle=0.0, t=0.0):
         PW, PH, C, R2 = self.PW, self.PH, self.C, self.R2
         a = self.active
         ix = self.x[:a].astype(np.int32)
@@ -1127,6 +1371,13 @@ class Field:
             lvl = np.full((R2, C), 11, np.int32)
         else:
             lvl = np.clip(((.3 + se * .55 + np.minimum(ss * .1, .35)) * 15).astype(int), 0, 15)
+
+        # sparkle only lands on cells that already have particles, so it
+        # twinkles instead of turning into noise
+        if sparkle > .01:
+            hot = ss > np.percentile(ss, 88) if ss.size else ss > 0
+            tw = np.random.rand(R2, C) < sparkle * .09 * (.5 + .5 * np.sin(t * 7.3))
+            lvl = np.where(hot & tw, 15, lvl)
 
         top = HUE_STEPS - 1
         cols = np.arange(C)
@@ -1613,7 +1864,7 @@ HELP_SECTIONS = [
     ]),
     ('Visuals', [
         ('1-9, 0', 'First ten modes'),
-        ('M or Right', 'Next mode (12 total)'),
+        ('M or Right', 'Next mode (24 total)'),
         ('Shift+M or Left', 'Previous mode'),
         ('T / Shift+T', 'Next / previous theme'),
         ('C / Shift+C', 'Next / previous accent'),
@@ -1639,7 +1890,7 @@ HELP_SECTIONS = [
         ('Q', 'Quit'),
         ('In settings', 'Arrows adjust, Shift coarse'),
         ('', 'Enter toggle, 0 reset'),
-        ('', 'Tab or 1-8 for sections'),
+        ('', 'Tab or 1-9 for sections'),
     ]),
 ]
 
@@ -1649,6 +1900,12 @@ DIGITS = tuple('1234567890')
 # Main application
 
 class App:
+    """Everything lives here: input, layout, drawing, actions, the loop.
+
+    One big object on purpose - the state really is shared, and splitting it
+    up would just mean passing the same dicts around. frame() is the only
+    orchestrator."""
+
     def __init__(self, args):
         self.args = args
         path = None if args.no_config else (args.config or default_config_path())
@@ -1722,7 +1979,7 @@ class App:
         self.ft = 0.0
         self.fps_now = float(P['fps'])
         self.next_cycle = 0.0
-        self.first_frame = True
+        self.morph_start = 0.0
 
     def apply_cli(self, a):
         c = self.cfg
@@ -2032,9 +2289,16 @@ class App:
         self.out.write('\x1b[2J')
 
     def set_mode(self, i, announce=True):
-        self.cfg.set('mode', MODES[i % len(MODES)])
+        name = MODES[i % len(MODES)]
+        if name == self.cfg['mode']:
+            return
+        self.cfg.set('mode', name)
+        # freeze the old shape so the next frames can glide into the new one
+        if self.field is not None:
+            self.field.snap()
+        self.morph_start = time.time()
         if announce:
-            self.toast('Mode: ' + MODES[i % len(MODES)])
+            self.toast('Mode: ' + name)
 
     def step_mode(self, d, announce=True):
         self.set_mode(MODES.index(self.cfg['mode']) + d, announce)
@@ -2160,8 +2424,16 @@ class App:
     def activate(self, st):
         if st.kind == 'action':
             self.run_action(st.key)
+        elif st.kind == 'link':
+            self.open_link(st)
         elif st.kind in ('toggle', 'choice'):
             self.cfg.adjust(st.key, 1)
+
+    def open_link(self, st):
+        if open_url(st.url):
+            self.toast('Opened ' + st.url, 2.5)
+        else:
+            self.toast('No browser found - ' + st.url, 4.0)
 
     def settings_key(self, name):
         tab = TABS[self.tab]
@@ -2187,7 +2459,7 @@ class App:
         elif name == 'end':
             self.sel[tab] = len(rows) - 1
         elif name in ('left', 'right'):
-            if st.kind != 'action':
+            if st.kind not in ('action', 'link'):
                 self.cfg.adjust(st.key, -1 if name == 'left' else 1, mult)
         elif name in ('enter', ' '):
             self.activate(st)
@@ -2195,10 +2467,10 @@ class App:
             self.tab = (self.tab + 1) % len(TABS)
         elif name == 'btab':
             self.tab = (self.tab - 1) % len(TABS)
-        elif name in tuple('12345678') and int(name) <= len(TABS):
+        elif name in tuple('123456789') and int(name) <= len(TABS):
             self.tab = int(name) - 1
         elif name in ('0', 'bksp', 'del'):
-            if st.kind != 'action':
+            if st.kind not in ('action', 'link'):
                 self.cfg.reset(st.key)
                 self.toast('Reset: ' + st.label, 1.0)
         elif name == 'w':
@@ -2568,16 +2840,33 @@ class App:
     def place(lines, x0, y0):
         return ''.join('\x1b[%d;%dH%s' % (y0 + i, x0, ln) for i, ln in enumerate(lines))
 
-    def draw_settings(self, C, R):
-        cfg = self.cfg
+    def credits_head(self):
+        """Banner above the link list. Separate so draw_settings can count the
+        lines before it lays out the box."""
         A = self.A
+        return [
+            [(C_DIM, '')],
+            [(A + BOLD, '  vizr'), (C_DIM, '   %s' % VERSION),
+             (C_DIM, '   \u00b7   terminal particle visualizer')],
+            [(C_DIM, '  made by '), (C_WHITE + BOLD, AUTHOR)],
+            [(C_DIM, '  one file, twenty-four modes, numpy and nothing else')],
+            [(C_DIM, '')],
+        ]
+
+    def draw_settings(self, C, R):
+        A = self.A
+        cfg = self.cfg
         tab = TABS[self.tab]
         rows = tab_settings(tab)
         maxrows = max(len(tab_settings(t)) for t in TABS)
+        head = self.credits_head() if tab == 'Credits' else []
         w = min(C - 2, 96)
         inner = w - 2
-        body_h = max(3, min(maxrows, R - 2 - 8))
-        h = body_h + 8
+        # credits has four rows of its own, so let that panel stay small
+        # instead of inheriting the height of the longest tab
+        room = min(maxrows, len(rows)) if tab == 'Credits' else maxrows
+        body_h = max(3, min(room, R - 2 - 8 - len(head)))
+        h = body_h + 8 + len(head)
         x0 = (C - w) // 2 + 1
         y0 = max(1, (R - h) // 2 + 1)
 
@@ -2611,7 +2900,7 @@ class App:
         self.ui_bar = (x0 + 5 + LW, cwid)
         self.ui_rows = {}
 
-        entries = [segs, None]
+        entries = [segs] + head + [None]
         for j in range(body_h):
             idx = sc + j
             if idx >= len(rows):
@@ -2619,14 +2908,14 @@ class App:
                 continue
             st = rows[idx]
             on = idx == sel
-            self.ui_rows[y0 + 3 + j] = idx
+            self.ui_rows[y0 + 3 + len(head) + j] = idx
             ptr = '\u25b8' if on else ' '
             line = [
                 (A if on else C_DIM, ' %s ' % ptr),
                 (C_WHITE if on else C_TXT, pad(st.label, LW)),
                 (C_DIM, ' '),
             ]
-            val = cfg.display(st.key) if st.kind != 'action' else ''
+            val = cfg.display(st.key) if st.kind not in ('action', 'link') else ''
             if st.kind in ('slider', 'int'):
                 n = int(round(cfg.frac(st.key) * (cwid - 1)))
                 line.append((A if on else fg(60, 120, 135), '\u2501' * n + '\u25cf'))
@@ -2639,6 +2928,11 @@ class App:
             elif st.kind == 'toggle':
                 state = bool(cfg[st.key])
                 line.append((C_OK if state else C_DIM, ('[\u25a0] ON' if state else '[ ] off')))
+            elif st.kind == 'link':
+                # show the address itself - it is the interesting bit here
+                url_txt = trunc(st.url.split('://')[-1].rstrip('/'), cwid + VW - 3)
+                line.append((C_DIM, '\u2197 '))
+                line.append((A if on else C_TXT, pad(url_txt, cwid + VW - 3)))
             else:
                 line.append((A if on else C_DIM, '\u23ce  run'))
             entries.append((line, SEL_BG if on else PANEL_BG))
@@ -2646,14 +2940,22 @@ class App:
         entries.append(None)
         st = rows[sel]
         desc = st.desc
-        if st.kind != 'action':
+        if st.kind not in ('action', 'link'):
             desc += '  (default: %s)' % Config.fmt_value(st, st.default)
         wrapped = textwrap.wrap(desc, max(10, inner - 2))[:2]
         wrapped += [''] * (2 - len(wrapped))
         for ln in wrapped:
             entries.append([(C_TXT, ' ' + ln)])
-        entries.append([(C_DIM, ' \u2191\u2193 select  \u2190\u2192 adjust  Shift coarse  \u23ce toggle  0 reset  Tab section  Esc close')])
-        title = 'ESEQ settings  \u00b7  %s' % tab
+        if tab == 'Credits':
+            hint = ' \u2191\u2193 select   \u23ce open link   Tab section   Esc close'
+        else:
+            hint = (' \u2191\u2193 select  \u2190\u2192 adjust  Shift coarse  \u23ce toggle  '
+                    '0 reset  Tab section  Esc close')
+        entries.append([(C_DIM, hint)])
+        if tab == 'Credits':
+            title = 'vizr  \u00b7  credits  \u00b7  v%s' % VERSION
+        else:
+            title = 'ESEQ settings  \u00b7  %s' % tab
         lines = self.box(w, title, entries)
         self.ui_rect = (x0, y0, w, len(lines))
         return self.place(lines, x0, y0)
@@ -2750,9 +3052,12 @@ class App:
             self.flash = max(self.flash, min(1.0, .5 + bass))
         self.flash *= .86 ** (dt * 60)
         self.update_bg()
+        span = P['morph']
+        morph = 1.0 if span <= .01 else clamp((t0 - self.morph_start) / span, 0, 1)
         field.step(MODES.index(P['mode']), lv, bass, beat, self.mp, shocks, dt, t0,
-                   self.spec.wave(x), P)
-        rows = field.render(self.lut, self.bg_now, self.effective_color_mode(), P['trail'], P['symmetry'])
+                   self.spec.wave(x), P, morph)
+        rows = field.render(self.lut, self.bg_now, self.effective_color_mode(), P['trail'],
+                            P['symmetry'], P['sparkle'], t0)
 
         parts = ['\x1b[?2026h']
         self.hot = []
@@ -2828,6 +3133,7 @@ def build_parser():
     ap.add_argument('--no-config', action='store_true', help='do not read or write a config file')
     ap.add_argument('--reset-config', action='store_true', help='ignore the saved config this run (it is overwritten on exit)')
     ap.add_argument('--no-intro', action='store_true', help='do not show the help screen on first launch')
+    ap.add_argument('--credits', action='store_true', help='print project links and exit')
     return ap
 
 
@@ -2851,8 +3157,21 @@ def list_players(args):
     return 0
 
 
+def print_credits():
+    print('vizr %s - terminal music visualizer' % VERSION)
+    print('made by %s\n' % AUTHOR)
+    print('  source    %s' % REPO)
+    print('  package   %s' % PYPI)
+    print('  github    %s' % GITHUB)
+    print('  discord   %s' % DISCORD)
+    print('\nThe same list lives in the settings panel under "Credits" (key 9).')
+
+
 def main(argv=None):
     args = build_parser().parse_args(argv)
+    if args.credits:
+        print_credits()
+        sys.exit(0)
     if args.list_players:
         sys.exit(list_players(args))
     if not (sys.stdout.isatty() and sys.stdin.isatty()):
