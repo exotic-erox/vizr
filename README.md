@@ -67,6 +67,18 @@ Settings persist to `~/.config/vizr/config.json`. Everything in the settings pan
 - PortAudio on the system: `sudo pacman -S portaudio` on Arch, `sudo apt install libportaudio2` on Debian/Ubuntu, `brew install portaudio` on macOS
 - Optional: `playerctl` for the now-playing HUD
 
+## installation
+
+system-wide installation
+```bash
+pipx install vizr
+```
+
+nix
+```bash
+nix run https://github.com/exotic-erox/vizr
+```
+
 ## why braille
 
 A cell is 2×4 dots, so a 120×40 terminal is really 240×160 pixels. That's enough to draw particles with trails without them looking like scattered blobs. The dots are also anti-aliased by the font itself, so motion looks smoother than it has any right to at this resolution.
