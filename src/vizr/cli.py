@@ -175,12 +175,14 @@ ACCENTS: Dict[str, Tuple[int, int, int]] = {
     'red': (255, 90, 110), 'amber': (255, 176, 60), 'pink': (255, 105, 180),
     'teal': (45, 212, 191), 'orange': (255, 128, 40), 'blue': (96, 165, 250),
     'white': (232, 238, 242), 'green': (34, 197, 94), 'indigo': (99, 102, 241),
+    'yellow': (255, 255, 11), 'acid': (127, 210, 67),
 }
 ACCENT_NAMES = tuple(ACCENTS)
 
 BACKGROUND_RGB: Dict[str, Tuple[int, int, int]] = {
     'dark': (4, 7, 10), 'black': (0, 0, 0), 'navy': (4, 9, 22),
     'purple': (11, 5, 20), 'forest': (3, 12, 8), 'midnight': (15, 15, 35),
+    'cyberpunk': (35, 20, 18), 'blood': (45, 0, 3),
 }
 BACKGROUNDS: Dict[str, str] = {k: bgc(*v) for k, v in BACKGROUND_RGB.items()}
 BACKGROUNDS['transparent'] = ''
@@ -198,6 +200,7 @@ THEMES: Dict[str, Tuple[str, str, str, str]] = {
     'Borealis': ('lime', 'violet', 'height', 'forest'),
     'Prism': ('cyan', 'pink', 'rainbow', 'black'),
     'Pulse': ('indigo', 'green', 'gradient', 'midnight'),
+    'Cyberpunk': ('yellow', 'acid', 'gradient', 'cyberpunk'),
 }
 COLOR_MODES = ('energy', 'gradient', 'velocity', 'height', 'rainbow', 'solid')
 
