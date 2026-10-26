@@ -1,1 +1,22 @@
-looks like i uploaded this by accident..
+[build-system]
+requires = ["setuptools>=77.0.3"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vizr"
+version = "5.1.0"
+description = "Terminal particle music visualizer with now-playing HUD"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.8"
+dependencies = [
+    "numpy",
+    "pillow",
+    "sounddevice",
+]
+
+[project.scripts]
+vizr = "vizr.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
