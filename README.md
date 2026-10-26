@@ -76,7 +76,7 @@ pipx install vizr
 
 nix
 ```bash
-nix run https://github.com/exotic-erox/vizr
+nix run github:exotic-erox/vizr
 ```
 
 ## why braille
